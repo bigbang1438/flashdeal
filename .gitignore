@@ -30,3 +30,7 @@ Thumbs.db
 
 # 本机配置
 .env
+
+# Node 编译缓存与临时目录
+frontend/.tmp/
+*.tmp
