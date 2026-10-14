@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.5</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.flashdeal</groupId>
+  <artifactId>flashdeal</artifactId>
+  <version>1.0.0</version>
+  <name>FlashDeal</name>
+  <description>高并发秒杀交易系统（零外部依赖可运行）</description>
+
+  <properties>
+    <java.version>21</java.version>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <surefire.version>3.3.0</surefire.version>
+    <!--
+      前端构建默认跳过：本机 Node 可用，但为了避免每次 mvn verify 都跑一遍 npm，
+      默认关闭；需要构建完整可部署包时用 -Dfrontend.build=true 打开。
+      已构建好的前端产物提交在 src/main/resources/static 下，Spring Boot 同源托管。
+    -->
+    <frontend.build>false</frontend.build>
+    <frontend.dir>${project.basedir}/frontend</frontend.dir>
+  </properties>
+
+  <dependencies>
+    <!-- Web / JSON / 内嵌 Tomcat -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- JDBC + HikariCP + DataSource 自动配置 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+
+    <!-- 参数校验（Jakarta Bean Validation） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- AOP：限流/幂等/指标切面 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-aop</artifactId>
+    </dependency>
+
+    <!-- H2 文件模式数据库：本机零外部依赖运行的唯一存储 -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Redis 客户端：仅用于「可插拔适配实现」的编译与单测，运行时不连真 Redis -->
+    <dependency>
+      <groupId>redis.clients</groupId>
+      <artifactId>jedis</artifactId>
+      <version>5.1.5</version>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- 测试：JUnit5 + AssertJ + MockMvc + 随机端口真实 HTTP -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>flashdeal</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>com.flashdeal.FlashDealApplication</mainClass>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${surefire.version}</version>
+        <configuration>
+          <!-- 并发测试需要较大堆与稳定的计时，显式固定参数 -->
+          <argLine>-Xms512m -Xmx2g -Dfile.encoding=UTF-8</argLine>
+          <trimStackTrace>false</trimStackTrace>
+        </configuration>
+      </plugin>
+
+      <!--
+        前端构建（可选）：mvn verify -Dfrontend.build=true
+        会用 npm 构建 Vue 管理台并复制到 src/main/resources/static，
+        这样打包出来的 jar 自带同源托管的管理台。
+      -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.1</version>
+        <executions>
+          <execution>
+            <id>npm-ci</id>
+            <phase>generate-resources</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <executable>npm</executable>
+              <workingDirectory>${frontend.dir}</workingDirectory>
+              <arguments>
+                <argument>install</argument>
+                <argument>--no-audit</argument>
+                <argument>--no-fund</argument>
+              </arguments>
+              <skip>${frontend.skip}</skip>
+            </configuration>
+          </execution>
+          <execution>
+            <id>npm-build</id>
+            <phase>generate-resources</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <executable>npm</executable>
+              <workingDirectory>${frontend.dir}</workingDirectory>
+              <arguments>
+                <argument>run</argument>
+                <argument>build</argument>
+              </arguments>
+              <skip>${frontend.skip}</skip>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- 把前端产物复制到 static 目录 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-frontend-dist</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${frontend.dir}/dist</directory>
+                  <filtering>false</filtering>
+                </resource>
+              </resources>
+              <skip>${frontend.skip}</skip>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- 默认 profile：不构建前端（静态产物已提交） -->
+    <profile>
+      <id>default-frontend</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <properties>
+        <frontend.skip>true</frontend.skip>
+      </properties>
+    </profile>
+    <!-- 构建前端：mvn verify -Dfrontend.build=true -->
+    <profile>
+      <id>with-frontend</id>
+      <activation>
+        <property>
+          <name>frontend.build</name>
+          <value>true</value>
+        </property>
+      </activation>
+      <properties>
+        <frontend.skip>false</frontend.skip>
+      </properties>
+    </profile>
+  </profiles>
+
+</project>

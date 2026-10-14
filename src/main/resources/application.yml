@@ -1,0 +1,110 @@
+server:
+  port: 8080
+  tomcat:
+    # 秒杀场景：加大工作线程池，避免压测时请求排队在容器层
+    threads:
+      max: 400
+      min-spare: 40
+    accept-count: 1000
+    max-connections: 20000
+
+spring:
+  application:
+    name: flashdeal
+  datasource:
+    # H2 文件模式：无需 MySQL / Docker，重启后数据仍在 ./data 目录
+    url: jdbc:h2:file:./data/flashdeal;MODE=MySQL;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE;LOCK_TIMEOUT=10000
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ''
+    hikari:
+      maximum-pool-size: 32
+      minimum-idle: 8
+      connection-timeout: 10000
+      pool-name: flashdeal-pool
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      # 每次启动重建表结构（演示项目，保证压测数据可复现）
+      continue-on-error: false
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jackson:
+    default-property-inclusion: non_null
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  web:
+    resources:
+      static-locations: classpath:/static/
+
+# =====================================================================
+# FlashDeal 业务配置（全部可通过环境变量覆盖）
+# =====================================================================
+flashdeal:
+  cache:
+    l2: embedded                    # embedded | redis
+    namespace: "flashdeal:"
+    product:
+      max-size: 10000        # L1 最大条目数
+      ttl-millis: 60000      # L1 存活时间
+    activity:
+      max-size: 10000
+      ttl-millis: 30000
+  stock:
+    # 库存扣减策略：db-cas（数据库乐观锁） | memory（内存预扣 + 异步落库）
+    mode: db-cas
+    warmup-on-startup: true
+    cas-max-retry: 20
+  mq:
+    order:
+      ring-buffer-size: 65536      # 必须是 2 的幂
+      batch-size: 64               # 批量消费条数
+      consumer-threads: 4
+      max-retry: 3
+      retry-backoff-millis: 20
+    stock:
+      ring-buffer-size: 65536
+      batch-size: 128
+      consumer-threads: 2
+      max-retry: 5
+  rate-limit:
+    order:
+      algorithm: token-bucket       # token-bucket | sliding-window
+      capacity: 2000                # 令牌桶容量 / 窗口配额
+      refill-per-second: 2000       # 每秒补充令牌数
+      window-millis: 1000
+      user-capacity: 50             # 单用户维度配额
+      user-refill-per-second: 50
+  lock:
+    mode: local                     # local | redis | redis-fake
+  idempotent:
+    processing-timeout-millis: 30000
+  order:
+    pay-timeout-seconds: 300        # 未支付超时时间
+    expire-scan-interval-millis: 1000
+    expire-scan-batch: 200
+    machine-id: "01"
+  metrics:
+    latency-buffer-size: 8192       # 每个接口保留的延迟样本数（环形）
+  web:
+    cors-enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    root: INFO
+    com.flashdeal: INFO
+    org.springframework.jdbc.core: WARN
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"

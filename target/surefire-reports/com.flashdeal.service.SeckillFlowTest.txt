@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.flashdeal.service.SeckillFlowTest
+-------------------------------------------------------------------------------
+Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 16.38 s -- in com.flashdeal.service.SeckillFlowTest

@@ -1,0 +1,107 @@
+# =====================================================================
+# FlashDeal 单机编排
+#
+# 默认 profile（无 Redis）：只起应用一个服务，H2 文件库 + 自研缓存/锁/队列，
+#   完全零外部依赖。
+#
+# 带 Redis profile：额外起一个 Redis，应用切到
+#   flashdeal.lock.mode=redis + flashdeal.cache.l2=redis，
+#   用于演示「可插拔适配」在真实中间件下的表现。
+#
+# 用法：
+#   默认：      docker compose up -d
+#   带 Redis：  docker compose --profile redis up -d
+#
+# 注意：本机没有 Docker，此文件是交付物，未在本机实际执行过。
+# =====================================================================
+
+services:
+  flashdeal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flashdeal:1.0.0
+    container_name: flashdeal-app
+    ports:
+      - "8080:8080"
+    environment:
+      # 存储：H2 文件模式，数据落在命名卷
+      SPRING_DATASOURCE_URL: "jdbc:h2:file:/app/data/flashdeal;MODE=MySQL;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE"
+      # 库存策略：db-cas（数据库乐观锁）或 memory（内存预扣 + 异步落库）
+      FLASHDEAL_STOCK_MODE: "${FLASHDEAL_STOCK_MODE:-db-cas}"
+      # 限流算法：token-bucket 或 sliding-window
+      FLASHDEAL_RATE_LIMIT_ORDER_ALGORITHM: "${FLASHDEAL_RATE_LIMIT_ALGORITHM:-token-bucket}"
+      # 锁与缓存：默认本机实现；redis profile 下由下面的服务覆盖
+      FLASHDEAL_LOCK_MODE: "local"
+      FLASHDEAL_CACHE_L2: "embedded"
+      JAVA_OPTS: "-Xms512m -Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8"
+    volumes:
+      - flashdeal-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/metrics/summary"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - flashdeal-net
+
+  # -------------------------------------------------------------------
+  # 可选：Redis。仅在 --profile redis 时启动。
+  # 应用侧通过 redis 模式接入，代码路径与 FakeRedisScriptExecutor 完全一致。
+  # -------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: flashdeal-redis
+    profiles: ["redis"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - flashdeal-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - flashdeal-net
+
+  # -------------------------------------------------------------------
+  # 可选：Redis 模式下的应用副本，覆盖锁与缓存配置。
+  # 启动：docker compose --profile redis up -d flashdeal-redis-mode
+  # -------------------------------------------------------------------
+  flashdeal-redis-mode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: flashdeal:1.0.0
+    container_name: flashdeal-app-redis
+    profiles: ["redis"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:h2:file:/app/data/flashdeal;MODE=MySQL;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE"
+      FLASHDEAL_LOCK_MODE: "redis"
+      FLASHDEAL_CACHE_L2: "redis"
+      FLASHDEAL_REDIS_URL: "redis://redis:6379"
+      JAVA_OPTS: "-Xms512m -Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8"
+    volumes:
+      - flashdeal-data-redis:/app/data
+    restart: unless-stopped
+    networks:
+      - flashdeal-net
+
+volumes:
+  flashdeal-data:
+  flashdeal-data-redis:
+  flashdeal-redis:
+
+networks:
+  flashdeal-net:
+    driver: bridge
